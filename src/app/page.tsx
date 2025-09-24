@@ -1,21 +1,16 @@
-import { getQueryClient } from "@/trpc/routers/server";
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
-import Client from "./client";
-import { Suspense } from "react";
+"use client";
+import { Button } from "@/components/ui/button";
+import { useTRPC } from "@/trpc/client";
+import { useMutation } from "@tanstack/react-query";
 
-export default async function Home() {
-  const queryClient = getQueryClient();
-  // const greeting = await queryClient.fetchQuery(
-  //   trpc.hello.queryOptions({ text: "world" })
-  // );
-  // const greeting = await caller.hello({ text: "world" });
-  // const users = await prisma.user.findMany();
-
+export default function Home() {
+  const trpc = useTRPC();
+  const invoke = useMutation(trpc.invoke.mutationOptions({}));
   return (
-    <HydrationBoundary state={dehydrate(queryClient)}>
-      <Suspense fallback={<div>Loading...</div>}>
-        <Client />
-      </Suspense>
-    </HydrationBoundary>
+    <div className="flex flex-col items-center justify-center h-screen p-4">
+      <Button onClick={() => invoke.mutate({ text: "world" })}>
+        Invoke Inngest
+      </Button>
+    </div>
   );
 }

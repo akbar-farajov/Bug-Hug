@@ -1,12 +1,11 @@
 import {
-  Agent,
   openai,
   createAgent,
   createTool,
   createNetwork,
 } from "@inngest/agent-kit";
 import { inngest } from "./client";
-import { Sandbox } from "e2b";
+import { Sandbox } from "@e2b/code-interpreter";
 import { getSandbox, lastAssistantTextMessageContent } from "./utils";
 import { z } from "zod";
 import { PROMPT } from "../prompt";
@@ -16,126 +15,121 @@ export const helloWorld = inngest.createFunction(
   { event: "test/hello.world" },
   async ({ event, step }) => {
     const sandboxId = await step.run("get-sandbox-id", async () => {
-      const sandbox = await Sandbox.create("bug-hug-test-2");
+      const sandbox = await Sandbox.create("bug-hug");
       return sandbox.sandboxId;
     });
 
-    const terminalTool = createTool({
-      name: "terminal",
-      description: "Use the terminal to run commands",
-      parameters: z.object({
-        command: z.string(),
-      }),
-      handler: async ({ command }, { step }) => {
-        return await step?.run("terminal", async () => {
-          const buffers = {
-            stdout: "",
-            stderr: "",
-          };
-          try {
-            const sandbox = await getSandbox(sandboxId);
-            const result = await sandbox.commands.run(command, {
-              onStdout: (stdout) => {
-                buffers.stdout += stdout;
-              },
-              onStderr: (stderr) => {
-                buffers.stderr += stderr;
-              },
-            });
-            return result.stdout;
-          } catch (error) {
-            console.error(
-              `Command failed ${error} \nstdout ${buffers.stdout} \nstderr ${buffers.stderr}`
-            );
-            return `Command failed ${error} \nstdout ${buffers.stdout} \nstderr ${buffers.stderr}`;
-          }
-        });
-      },
-    });
-
-    const createOrUpdateFilesTool = createTool({
-      name: "createOrUpdateFiles",
-      description: "Use this tool to create or update a file in the sandbox",
-      parameters: z.object({
-        files: z.array(
-          z.object({
-            path: z.string(),
-            content: z.string(),
-          })
-        ),
-        content: z.string(),
-      }),
-      handler: async ({ files }, { step, network }) => {
-        const newFiles = await step?.run("createOrUpdateFiles", async () => {
-          try {
-            const updatedFiles = network.state.data.files || {};
-            const sandbox = await getSandbox(sandboxId);
-            for (const file of files) {
-              await sandbox.files.write(file.path, file.content);
-              updatedFiles[file.path] = file.content;
-            }
-            return updatedFiles;
-          } catch (error) {
-            console.error(error);
-            return error;
-          }
-        });
-        if (typeof newFiles === "object") {
-          network.state.data.files = newFiles;
-        }
-      },
-    });
-
-    const readFilesTool = createTool({
-      name: "readFiles",
-      description: "Use this tool to read a file in the sandbox",
-      parameters: z.object({
-        files: z.string(),
-      }),
-      handler: async ({ files }, { step }) => {
-        return await step?.run("readFiles", async () => {
-          try {
-            const sandbox = await getSandbox(sandboxId);
-            const contents = [];
-            for (const file of files) {
-              const content = await sandbox.files.read(file);
-              contents.push({ path: file, content });
-            }
-            return JSON.stringify(contents);
-          } catch (error) {
-            console.error(error);
-            return JSON.stringify({ error: error.message });
-          }
-        });
-      },
-    });
-
     const codeAgent = createAgent({
-      name: "code-agent",
+      name: "coding-agent",
+      description: "An expert coding agent",
       system: PROMPT,
-      model: openai({ model: "gpt-4.1" }),
-      defaultParameters: {
-        temperature: 0.1,
-      },
-      tools: [terminalTool, createOrUpdateFilesTool, readFilesTool] as any,
+      model: openai({
+        model: "gpt-4.1",
+        // defaultParameters: {
+        //   temperature: 0.1,
+        // },
+      }),
+
+      tools: [
+        createTool({
+          name: "terminal",
+          description: "Use the terminal to run commands",
+          parameters: z.object({
+            command: z.string(),
+          }),
+          handler: async ({ command }, { step }) => {
+            return await step?.run("terminal", async () => {
+              const buffers = { stdout: "", stderr: "" };
+              try {
+                const sandbox = await getSandbox(sandboxId);
+                const result = await sandbox.commands.run(command, {
+                  onStdout: (data) => (buffers.stdout += data),
+                  onStderr: (data) => (buffers.stderr += data),
+                });
+                return result.stdout;
+              } catch (e) {
+                console.error(`Error running command: ${command}`, e);
+                return `Error running command: ${command} ${e}`;
+              }
+            });
+          },
+        }),
+        createTool({
+          name: "createOrUpdateFiles",
+          description: "Create or update files in the sandbox",
+          parameters: z.object({
+            files: z.array(
+              z.object({
+                path: z.string(),
+                content: z.string(),
+              })
+            ),
+          }),
+          handler: async ({ files }, { step, network }) => {
+            const newFiles = await step?.run(
+              "createOrUpdateFiles",
+              async () => {
+                try {
+                  const updatedFiles = network.state.data.files || {};
+                  const sandbox = await getSandbox(sandboxId);
+                  console.log("sandbox", sandbox.files);
+
+                  for (const file of files) {
+                    await sandbox.files.write(file.path, file.content);
+                    updatedFiles[file.path] = file.content;
+                  }
+                  return updatedFiles;
+                } catch (e) {
+                  console.error(`Error creating or updating files`, e);
+                  return `Error creating or updating files: ${e}`;
+                }
+              }
+            );
+            if (typeof newFiles === "object") {
+              network.state.data.files = newFiles;
+            }
+          },
+        }),
+        createTool({
+          name: "readFiles",
+          description: "Read files from the sandbox",
+          parameters: z.object({
+            files: z.array(z.string()),
+          }),
+          handler: async ({ files }, { step }) => {
+            return await step?.run("readFiles", async () => {
+              try {
+                const sandbox = await getSandbox(sandboxId);
+                const contents = [];
+                for (const file of files) {
+                  const content = await sandbox.files.read(file);
+                  contents.push({ path: file, content });
+                }
+                return JSON.stringify(contents);
+              } catch (e) {
+                console.error(`Error reading files`, e);
+                return `Error reading files: ${e}`;
+              }
+            });
+          },
+        }),
+      ],
       lifecycle: {
-        onResponse: async (result, network) => {
+        onResponse: async ({ result, network }) => {
           const lastAssistantMessageText =
             lastAssistantTextMessageContent(result);
-
           if (lastAssistantMessageText && network) {
             if (lastAssistantMessageText.includes("<task_summary>")) {
               network.state.data.summary = lastAssistantMessageText;
             }
           }
-
           return result;
         },
       },
     });
 
     const network = createNetwork({
-      name: "code-agent-network",
+      name: "coding-agent-network",
       agents: [codeAgent],
       maxIter: 15,
       router: async ({ network }) => {

@@ -1,4 +1,4 @@
-import { Sandbox } from "e2b";
+import { Sandbox } from "@e2b/code-interpreter";
 import { AgentResult, TextMessage } from "@inngest/agent-kit";
 
 export const getSandbox = async (sandboxId: string) => {
@@ -7,7 +7,6 @@ export const getSandbox = async (sandboxId: string) => {
 };
 
 export const lastAssistantTextMessageContent = (result: AgentResult) => {
-  console.log(result.output);
   const lastAssistantTextMessageIndex = result.output.findLastIndex(
     (message) => message.role === "assistant"
   );
